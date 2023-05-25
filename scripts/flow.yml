@@ -1,0 +1,31 @@
+jtype: Flow
+jcloud:
+  version: 3.14.1
+  monitor:
+    traces:
+      enable: false # avoid issue on jcloud side
+with:
+  #  port: 51000
+  monitoring: true
+  name: coca-cpu-flow
+  prefetch: 5
+gateway:
+  port:
+    - 51000
+    - 52000
+  protocol:
+    - grpc
+    - http
+executors:
+  - name: SwinIR
+    uses:
+      jtype: SRExecutor
+      py_modules:
+        - ../__init__.py
+    uses_with:
+      model_name: real_sr::003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN
+      minibatch_size: 16
+      device: cpu
+    env:
+      #JINA_LOG_LEVEL: DEBUG
+      timeout_ready: 3600000
