@@ -5,9 +5,8 @@ jcloud:
     traces:
       enable: false # avoid issue on jcloud side
 with:
-  #  port: 51000
   monitoring: true
-  name: coca-cpu-flow
+  name: swinIR-gpu-flow
   prefetch: 5
 gateway:
   port:
@@ -19,9 +18,10 @@ gateway:
 executors:
   - name: SwinIR
     uses:
-      jtype: SRExecutor
-      py_modules:
-        - ../__init__.py
+       jinaai+docker://zihao/184x2sr8
+#      jtype: SRExecutor
+#      py_modules:
+#        - ./__init__.py
     uses_with:
       model_name: real_sr::003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN
       minibatch_size: 16

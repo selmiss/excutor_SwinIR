@@ -6,6 +6,7 @@ from jina.logging.logger import JinaLogger
 import requests as requests_ori
 import os
 import io
+import time
 import numpy as np
 from multiprocessing.pool import ThreadPool
 from .SwinIR.models.network_swinir import SwinIR as net
@@ -160,6 +161,7 @@ class SRExecutor(Executor):
         return da, tensors_batch
 
     def sr_inference(self, img_lq, window_size):
+        start_time = time.perf_counter()
         if self.tile is None:
             # test the image as a whole
             output = self.model(img_lq)
@@ -186,12 +188,15 @@ class SRExecutor(Executor):
                     E[..., h_idx*sf:(h_idx+tile)*sf, w_idx*sf:(w_idx+tile)*sf].add_(out_patch)
                     W[..., h_idx*sf:(h_idx+tile)*sf, w_idx*sf:(w_idx+tile)*sf].add_(out_patch_mask)
             output = E.div_(W)
-        return output
+        end_time = time.perf_counter()
+        return output, round(end_time - start_time, 3)
 
     @requests(on='/sr')
     def sr(self, docs: DocumentArray, parameters: Dict = {}, **kwargs):
+
         docs, _ = self.preproc_image(docs)
         for idx, d in enumerate(docs):
+            start_process = time.perf_counter()
             img_lq = d.tensor.astype(np.float32) / 255.
             img_lq = np.transpose(img_lq if img_lq.shape[2] == 1 else img_lq[:, :, [2, 1, 0]], (2, 0, 1))  # HCW-BGR to CHW-RGB
             img_lq = torch.from_numpy(img_lq).float().unsqueeze(0).to(self._device)  # CHW-RGB to NCHW-RGB
@@ -205,7 +210,8 @@ class SRExecutor(Executor):
                 w_pad = (w_old // window_size + 1) * window_size - w_old
                 img_lq = torch.cat([img_lq, torch.flip(img_lq, [2])], 2)[:, :, :h_old + h_pad, :]
                 img_lq = torch.cat([img_lq, torch.flip(img_lq, [3])], 3)[:, :, :, :w_old + w_pad]
-                output = self.sr_inference(img_lq, window_size)
+                output, runtime = self.sr_inference(img_lq, window_size)
+                print(idx, runtime)
                 output = output[..., :h_old * self.upscale, :w_old * self.upscale]
 
             # save image
@@ -214,6 +220,10 @@ class SRExecutor(Executor):
                 output = np.transpose(output[[2, 1, 0], :, :], (1, 2, 0))  # CHW-RGB to HCW-BGR
             output = (output * 255.0).round().astype(np.uint8)  # float32 to uint8
             d.embedding = output
+            end_precess = time.perf_counter()
+            runtime = round(end_precess - start_process, 3)
+            d.tags = {'runtime': runtime}
+
         return docs
 
 
