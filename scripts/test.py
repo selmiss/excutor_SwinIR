@@ -9,7 +9,7 @@ def sr_test():
     image_uri = './SwinIR/testsets/RealSRSet+5images/chip.png'
     img = mpimg.imread(image_uri)
     start_time = time.perf_counter()
-    response = Client(host='grpc://127.0.0.1:51000').post(
+    response = Client(host='grpc://127.0.0.1:50635').post(
         on='/sr',  inputs=DocumentArray([Document(uri=image_uri)]), show_progress=True
     )
     end_time = time.perf_counter()
