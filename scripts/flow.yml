@@ -18,12 +18,12 @@ gateway:
 executors:
   - name: SwinIR
     uses:
-       jinaai+docker://zihao/184x2sr8
-#      jtype: SRExecutor
-#      py_modules:
-#        - ./__init__.py
+#       jinaai+docker://zihao/184x2sr8
+      jtype: SwinIRExecutor
+      py_modules:
+        - ../__init__.py
     uses_with:
-      model_name: real_sr::003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN
+      model_name: real_sr::BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN
       minibatch_size: 16
       device: cpu
     env:
