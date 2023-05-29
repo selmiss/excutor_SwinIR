@@ -1,8 +1,8 @@
-jtype: SRExecutor
+jtype: SwinIRExecutor
 py_modules:
   - __init__.py
 metas:
-  name: SRExecutor
+  name: SwinIRExecutor
   description: SwinIR for super resolution tasks.
   url: https://github.com/selmiss/excutor_SwinIR
   keywords: [SwinIR, vision, image, super-resolution, pytorch]

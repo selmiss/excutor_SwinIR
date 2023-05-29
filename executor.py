@@ -1,27 +1,29 @@
-from typing import Tuple, Dict, Union, Optional
+from typing import Tuple, Dict, Optional
 from jina import DocumentArray, Executor, requests
 import torch
-from PIL import Image
 from jina.logging.logger import JinaLogger
-import requests as requests_ori
 import os
-import io
 import time
 import numpy as np
 from multiprocessing.pool import ThreadPool
 from .SwinIR.models.network_swinir import SwinIR as net
 
 
-class SRExecutor(Executor):
+S3_PATH = (
+    'https://clip-as-service.s3.us-east-2.amazonaws.com/models/super_resolution/swin_ir'
+)
+TMP_PATH = './tmp'
+
+
+class SwinIRExecutor(Executor):
     """"""
     def __init__(
             self,
-            model_name: str = 'real_sr::003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN',
+            model_name: str = 'real_sr::BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN',
             minibatch_size: int = 32,
             num_worker_preprocess: int = 4,
             upscale: int = 4,
             large_model: bool = False,
-            training_patch_size: int = 128,
             tile: int = None,
             tile_overlap: int = 32,
             device: Optional[str] = None,
@@ -31,21 +33,20 @@ class SRExecutor(Executor):
         self.logger = JinaLogger(self.__class__.__name__)
         self.upscale = upscale
         self.large_model = large_model
-        self.training_patch_size = training_patch_size
         self.tile = tile
         self.tile_overlap = tile_overlap
 
-        self.model_name, self.pretrained = model_name.split('::')
-        self.pretrained = './checkpoints/' + self.pretrained + '.pth'
+        self.model_name = model_name
+        self.model_type, self.s3_file_name = self.model_name.split('::')
 
-        if os.path.exists(self.pretrained):
-            print(f'loading model from {self.pretrained}')
-        else:
-            os.makedirs(os.path.dirname(self.pretrained), exist_ok=True)
-            url = 'https://github.com/JingyunLiang/SwinIR/releases/download/v0.0/{}'.format(os.path.basename(self.pretrained))
-            r = requests_ori.get(url, allow_redirects=True)
-            print(f'downloading model {self.pretrained}')
-            open(self.pretrained, 'wb').write(r.content)
+        model_path = os.path.join(TMP_PATH, self.s3_file_name + '.pth')
+
+        if not os.path.exists(model_path):
+            self.download_model(
+                os.path.join(S3_PATH, self.s3_file_name + '.pth'),
+                os.path.join(TMP_PATH, self.s3_file_name + '.pth'),
+            )
+
         self._minibatch_size = minibatch_size
 
         self._pool = ThreadPool(processes=num_worker_preprocess)
@@ -58,25 +59,24 @@ class SRExecutor(Executor):
 
     def _init_model_weights(self):
         self.logger.info(
-            f"Model initialization start, model_name: {self.model_name}, "
-            f"pretrained: {self.pretrained}..."
+            f"Model initialization start, model_name: {self.model_name}"
         )
-        if self.model_name == 'classical_sr':
-            model = net(upscale=self.upscale, in_chans=3, img_size=self.training_patch_size, window_size=8,
+        if self.model_type == 'classical_sr':
+            model = net(upscale=self.upscale, in_chans=3, img_size=64, window_size=8,
                         img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6],
                         mlp_ratio=2, upsampler='pixelshuffle', resi_connection='1conv')
             param_key_g = 'params'
 
         # 002 lightweight image sr
         # use 'pixelshuffledirect' to save parameters
-        elif self.model_name == 'lightweight_sr':
+        elif self.model_type == 'lightweight_sr':
             model = net(upscale=self.upscale, in_chans=3, img_size=64, window_size=8,
                         img_range=1., depths=[6, 6, 6, 6], embed_dim=60, num_heads=[6, 6, 6, 6],
                         mlp_ratio=2, upsampler='pixelshuffledirect', resi_connection='1conv')
             param_key_g = 'params'
 
         # 003 real-world image sr
-        elif self.model_name == 'real_sr':
+        elif self.model_type == 'real_sr':
             if not self.large_model:
                 # use 'nearest+conv' to avoid block artifacts
                 model = net(upscale=self.upscale, in_chans=3, img_size=64, window_size=8,
@@ -90,37 +90,7 @@ class SRExecutor(Executor):
                             mlp_ratio=2, upsampler='nearest+conv', resi_connection='3conv')
             param_key_g = 'params_ema'
 
-        # 004 grayscale image denoising
-        elif self.model_name == 'gray_dn':
-            model = net(upscale=1, in_chans=1, img_size=128, window_size=8,
-                        img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6],
-                        mlp_ratio=2, upsampler='', resi_connection='1conv')
-            param_key_g = 'params'
-
-        # 005 color image denoising
-        elif self.model_name == 'color_dn':
-            model = net(upscale=1, in_chans=3, img_size=128, window_size=8,
-                        img_range=1., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6],
-                        mlp_ratio=2, upsampler='', resi_connection='1conv')
-            param_key_g = 'params'
-
-        # 006 grayscale JPEG compression artifact reduction
-        # use window_size=7 because JPEG encoding uses 8x8; use img_range=255 because it's sligtly better than 1
-        elif self.model_name == 'jpeg_car':
-            model = net(upscale=1, in_chans=1, img_size=126, window_size=7,
-                        img_range=255., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6],
-                        mlp_ratio=2, upsampler='', resi_connection='1conv')
-            param_key_g = 'params'
-
-        # 006 color JPEG compression artifact reduction
-        # use window_size=7 because JPEG encoding uses 8x8; use img_range=255 because it's sligtly better than 1
-        elif self.model_name == 'color_jpeg_car':
-            model = net(upscale=1, in_chans=3, img_size=126, window_size=7,
-                        img_range=255., depths=[6, 6, 6, 6, 6, 6], embed_dim=180, num_heads=[6, 6, 6, 6, 6, 6],
-                        mlp_ratio=2, upsampler='', resi_connection='1conv')
-            param_key_g = 'params'
-
-        pretrained_model = torch.load(self.pretrained)
+        pretrained_model = torch.load(os.path.join(TMP_PATH, self.s3_file_name + '.pth'))
         model.load_state_dict(pretrained_model[param_key_g] if param_key_g in pretrained_model.keys() else pretrained_model, strict=True)
 
         model.eval()
@@ -134,27 +104,21 @@ class SRExecutor(Executor):
     def preproc_image(
             self,
             da: 'DocumentArray',
-            device: str = 'cpu',
             drop_image_content: bool = False,
     ) -> Tuple['DocumentArray', torch.tensor]:
 
         tensors_batch = []
 
         for d in da:
-            # content = d.content
             if d.blob:
-                image = Image.open(io.BytesIO(d.blob)).convert('RGB')
-                d.convert_blob_to_tensor()
+                d.convert_blob_to_image_tensor()
             elif d.uri:
-                # image = Image.open(io.BytesIO(d.load_uri_to_blob().blob)).convert('RGB')
-                image = d.load_uri_to_image_tensor().tensor
-            elif d.tensor is not None:
-                # image = Image.fromarray(d.tensor).convert('RGB')
-                image = d.tensor
+                d.load_uri_to_image_tensor()
+            image = d.tensor
+            if image is None:
+                raise ValueError(f"input image is None")
             tensors_batch.append(image)
 
-            # recover doc content
-            # d.content = content
             if drop_image_content:
                 d.pop('blob', 'tensor')
 
@@ -191,12 +155,11 @@ class SRExecutor(Executor):
         end_time = time.perf_counter()
         return output, round(end_time - start_time, 3)
 
-    @requests(on='/sr')
-    def sr(self, docs: DocumentArray, parameters: Dict = {}, **kwargs):
+    @requests(on='/upscale')
+    def upscale(self, docs: DocumentArray, parameters: Dict = {}, **kwargs):
 
         docs, _ = self.preproc_image(docs)
         for idx, d in enumerate(docs):
-            start_process = time.perf_counter()
             img_lq = d.tensor.astype(np.float32) / 255.
             img_lq = np.transpose(img_lq if img_lq.shape[2] == 1 else img_lq[:, :, [2, 1, 0]], (2, 0, 1))  # HCW-BGR to CHW-RGB
             img_lq = torch.from_numpy(img_lq).float().unsqueeze(0).to(self._device)  # CHW-RGB to NCHW-RGB
@@ -211,7 +174,6 @@ class SRExecutor(Executor):
                 img_lq = torch.cat([img_lq, torch.flip(img_lq, [2])], 2)[:, :, :h_old + h_pad, :]
                 img_lq = torch.cat([img_lq, torch.flip(img_lq, [3])], 3)[:, :, :, :w_old + w_pad]
                 output, runtime = self.sr_inference(img_lq, window_size)
-                print(idx, runtime)
                 output = output[..., :h_old * self.upscale, :w_old * self.upscale]
 
             # save image
@@ -219,18 +181,80 @@ class SRExecutor(Executor):
             if output.ndim == 3:
                 output = np.transpose(output[[2, 1, 0], :, :], (1, 2, 0))  # CHW-RGB to HCW-BGR
             output = (output * 255.0).round().astype(np.uint8)  # float32 to uint8
-            d.embedding = output
-            end_precess = time.perf_counter()
-            runtime = round(end_precess - start_process, 3)
             d.tags = {'runtime': runtime}
+            d.tensor = output
+            d.convert_image_tensor_to_blob()
 
         return docs
 
+    @staticmethod
+    def download_model(url, dst, hash_prefix=None, progress=True):
+        r"""Download object at the given URL to a local path.
+            Refer to torch.hub.download_url_to_file
+        Args:
+            url (str): URL of the object to download
+            dst (str): Full path where object will be saved, e.g. ``/tmp/temporary_file``
+            hash_prefix (str, optional): If not None, the SHA256 downloaded file should start with ``hash_prefix``.
+                Default: None
+            progress (bool, optional): whether or not to display a progress bar to stderr
+                Default: True
+        """
+        from urllib.request import urlopen, Request
+        import shutil
+        from tqdm import tqdm
+        import hashlib
+        import tempfile
 
-'''
-from jina import Deployment
+        file_size = None
+        req = Request(url, headers={"User-Agent": "torch.hub"})
+        u = urlopen(req)
+        meta = u.info()
+        if hasattr(meta, 'getheaders'):
+            content_length = meta.getheaders("Content-Length")
+        else:
+            content_length = meta.get_all("Content-Length")
+        if content_length is not None and len(content_length) > 0:
+            file_size = int(content_length[0])
 
-with Deployment(uses=SRExecutor, port=12345, replicas=2) as dep:
-    print('SRmodel started...')
-    dep.block()
-'''
+        # We deliberately save it in a temp file and move it after
+        # download is complete. This prevents a local working checkpoint
+        # being overridden by a broken download.
+        dst = os.path.expanduser(dst)
+        dst_dir = os.path.dirname(dst)
+        if not os.path.exists(dst_dir):
+            os.mkdir(dst_dir)
+        f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)
+
+        try:
+            if hash_prefix is not None:
+                sha256 = hashlib.sha256()
+            with tqdm(
+                    total=file_size,
+                    disable=not progress,
+                    unit='B',
+                    unit_scale=True,
+                    unit_divisor=1024,
+            ) as pbar:
+                while True:
+                    buffer = u.read(8192)
+                    if len(buffer) == 0:
+                        break
+                    f.write(buffer)
+                    if hash_prefix is not None:
+                        sha256.update(buffer)
+                    pbar.update(len(buffer))
+
+            f.close()
+            if hash_prefix is not None:
+                digest = sha256.hexdigest()
+                if digest[: len(hash_prefix)] != hash_prefix:
+                    raise RuntimeError(
+                        'invalid hash value (expected "{}", got "{}")'.format(
+                            hash_prefix, digest
+                        )
+                    )
+            shutil.move(f.name, dst)
+        finally:
+            f.close()
+            if os.path.exists(f.name):
+                os.remove(f.name)
