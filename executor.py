@@ -39,10 +39,13 @@ class SwinIRExecutor(Executor):
         self.model_name = model_name
         self.model_type, self.s3_file_name = self.model_name.split('::')
 
-        self.download_model(
-            os.path.join(S3_PATH, self.s3_file_name + '.pth'),
-            os.path.join(TMP_PATH, self.s3_file_name + '.pth'),
-        )
+        model_path = os.path.join(TMP_PATH, self.s3_file_name + '.pth')
+
+        if not os.path.exists(model_path):
+            self.download_model(
+                os.path.join(S3_PATH, self.s3_file_name + '.pth'),
+                os.path.join(TMP_PATH, self.s3_file_name + '.pth'),
+            )
 
         self._minibatch_size = minibatch_size
 
@@ -178,7 +181,7 @@ class SwinIRExecutor(Executor):
             if output.ndim == 3:
                 output = np.transpose(output[[2, 1, 0], :, :], (1, 2, 0))  # CHW-RGB to HCW-BGR
             output = (output * 255.0).round().astype(np.uint8)  # float32 to uint8
-
+            d.tags = {'runtime': runtime}
             d.tensor = output
             d.convert_image_tensor_to_blob()
 
@@ -218,6 +221,8 @@ class SwinIRExecutor(Executor):
         # being overridden by a broken download.
         dst = os.path.expanduser(dst)
         dst_dir = os.path.dirname(dst)
+        if not os.path.exists(dst_dir):
+            os.mkdir(dst_dir)
         f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)
 
         try:
