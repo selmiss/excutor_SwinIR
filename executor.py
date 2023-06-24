@@ -158,6 +158,12 @@ class SwinIRExecutor(Executor):
     @requests(on='/upscale')
     def upscale(self, docs: DocumentArray, parameters: Dict = {}, **kwargs):
 
+        _output_format = parameters.get('output_format', 'tensor')
+        if _output_format not in ['tensor', 'blob']:
+            raise ValueError(
+                f"output format only supports tensor and blob, got {_output_format}"
+            )
+
         docs, _ = self.preproc_image(docs)
         for idx, d in enumerate(docs):
             img_lq = d.tensor.astype(np.float32) / 255.
@@ -183,7 +189,8 @@ class SwinIRExecutor(Executor):
             output = (output * 255.0).round().astype(np.uint8)  # float32 to uint8
             d.tags = {'runtime': runtime}
             d.tensor = output
-            d.convert_image_tensor_to_blob()
+            if _output_format == 'blob':
+                doc.convert_image_tensor_to_blob()
 
         return docs
 
