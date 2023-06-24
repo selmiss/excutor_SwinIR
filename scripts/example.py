@@ -5,15 +5,12 @@ from PIL import Image
 import io
 
 FLOW_CONFIG_PATH = 'flow.yml'
-ENDPOINT = None
-# ENDPOINT = 'grpc://0.0.0.0:51000'
+# ENDPOINT = None
+ENDPOINT = 'grpc://0.0.0.0:51612'
 # ENDPOINT = "grpcs://inspired-mallard-b41d2134e0-grpc.wolf.jina.ai"
 
 IMAGES = [
-    'https://replicate.delivery/mgxm/efd1b6b0-4d79-4a42-ab31-2dcd29754a2d/chip.png',
-    'https://storage.googleapis.com/causal-diffusion.appspot.com/imagePrompts%2F0rw369i5h9t%2Foriginal.png',
-    'https://storage.googleapis.com/causal-diffusion.appspot.com/imagePrompts%2F0ixde4g8gwte%2Foriginal.png',
-    'https://clip-as-service.s3.us-east-2.amazonaws.com/models/super_resolution/cv2/Best-Honey-Butter-Roasted-Carrots0-1.jpg'
+    'https://replicate.delivery/mgxm/efd1b6b0-4d79-4a42-ab31-2dcd29754a2d/chip.png'
 ]
 
 image_da = DocumentArray([Document(uri=uri, tags={'uri': uri}).load_uri_to_blob() for uri in IMAGES])

@@ -1,0 +1,40 @@
+jtype: Flow
+jcloud:
+  version: 3.14.1
+  monitor:
+    traces:
+      enable: false # avoid issue on jcloud side
+with:
+  #  port: 51000
+  monitoring: true
+  name: swinir_model-cpu-flow
+  prefetch: 5
+  env:
+    JINA_LOG_LEVEL: DEBUG
+#gateway:
+#  uses: docker://inferenceteam/paywall-gateway:0.2.1
+#  uses_with:
+#    pricing_factor: 0.0
+#  port:
+#    - 51000
+#    - 52000
+#  protocol:
+#    - grpc
+#    - http
+#  jcloud:
+#    resources:
+#      instance: C2
+#      capacity: spot
+executors:
+  - name: upscaler
+    uses: docker://selmiss/swinir:0.0.1
+    uses_with:
+      device: cpu
+    env:
+      JINA_LOG_LEVEL: DEBUG
+#    gpus: all
+    timeout_ready: 3600000
+    jcloud:
+      resources:
+        instance: G1
+        capacity: spot
