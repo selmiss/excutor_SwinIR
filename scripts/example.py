@@ -6,7 +6,7 @@ import io
 
 FLOW_CONFIG_PATH = 'flow.yml'
 # ENDPOINT = None
-ENDPOINT = 'grpc://0.0.0.0:51612'
+ENDPOINT = 'grpc://0.0.0.0:51000'
 # ENDPOINT = "grpcs://inspired-mallard-b41d2134e0-grpc.wolf.jina.ai"
 
 IMAGES = [
@@ -20,7 +20,7 @@ if ENDPOINT:
     client = Client(host=ENDPOINT)
 
     print(f'===> Super-resolution task ...')
-    result = client.post(on='/upscale', inputs=image_da, show_progress=True)
+    result = client.post(on='/upscale', inputs=image_da, parameters={'output_format': 'blob'}, show_progress=True)
     if not os.path.exists('results'):
         os.mkdir('results')
     for idx, r in enumerate(result):

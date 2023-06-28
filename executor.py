@@ -38,6 +38,7 @@ class SwinIRExecutor(Executor):
 
         self.model_name = model_name
         self.model_type, self.s3_file_name = self.model_name.split('::')
+        self.set_max_size()
 
         model_path = os.path.join(TMP_PATH, self.s3_file_name + '.pth')
 
@@ -100,6 +101,9 @@ class SwinIRExecutor(Executor):
         self.logger.info(
             f"Model initialization success!"
         )
+
+    def set_max_size(self):
+        self.max_size = 1024 * 1024
 
     def preproc_image(
             self,
@@ -164,8 +168,22 @@ class SwinIRExecutor(Executor):
                 f"output format only supports tensor and blob, got {_output_format}"
             )
 
-        docs, _ = self.preproc_image(docs)
+        # docs, _ = self.preproc_image(docs)
         for idx, d in enumerate(docs):
+            if d.blob:
+                d.convert_blob_to_image_tensor()
+            assert d.tensor is not None, "Failed to load image."
+
+            if (
+                    self.max_size
+                    and d.tensor.shape[0] * d.tensor.shape[1] > self.max_size
+            ):
+                raise ValueError(
+                    f"Max image pixels for input is {self.max_size} "
+                    f"(height * width), but got {d.tensor.shape[0] * d.tensor.shape[1]} "
+                    f"({d.tensor.shape[0]} * {d.tensor.shape[1]})"
+                )
+
             img_lq = d.tensor.astype(np.float32) / 255.
             img_lq = np.transpose(img_lq if img_lq.shape[2] == 1 else img_lq[:, :, [2, 1, 0]], (2, 0, 1))  # HCW-BGR to CHW-RGB
             img_lq = torch.from_numpy(img_lq).float().unsqueeze(0).to(self._device)  # CHW-RGB to NCHW-RGB
@@ -182,7 +200,6 @@ class SwinIRExecutor(Executor):
                 output, runtime = self.sr_inference(img_lq, window_size)
                 output = output[..., :h_old * self.upscale, :w_old * self.upscale]
 
-            # save image
             output = output.data.squeeze().float().cpu().clamp_(0, 1).numpy()
             if output.ndim == 3:
                 output = np.transpose(output[[2, 1, 0], :, :], (1, 2, 0))  # CHW-RGB to HCW-BGR
@@ -190,7 +207,7 @@ class SwinIRExecutor(Executor):
             d.tags = {'runtime': runtime}
             d.tensor = output
             if _output_format == 'blob':
-                doc.convert_image_tensor_to_blob()
+                d.convert_image_tensor_to_blob()
 
         return docs
 
